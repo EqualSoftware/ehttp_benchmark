@@ -1,0 +1,5 @@
+# Results are local to one machine. Keep a run by copying its folder out, or
+# remove the next line to commit it.
+results/*
+!results/.gitkeep
+!results/README.md
