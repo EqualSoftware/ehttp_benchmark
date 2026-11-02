@@ -1,0 +1,65 @@
+# One service per app. All have the same CPU and memory limits. Run ONE at a
+# time (the host port is shared):  make up APP=gin
+# Each service is in a profile with its own name, so "docker compose up" alone starts none.
+#
+# Limits (override with the environment, see the Makefile):
+#   BENCH_CPUSET  vCPUs of the Docker VM that the app may use (default 0-3)
+#   BENCH_CPUS    CPU quota, in CPUs (default 4). Go 1.25+ reads it for GOMAXPROCS.
+#   BENCH_MEM     memory limit (default 1g)
+# No GOMAXPROCS is set on purpose.
+x-app: &app
+  restart: "no"
+  cpuset: ${BENCH_CPUSET:-0-3}
+  cpus: ${BENCH_CPUS:-4}
+  mem_limit: ${BENCH_MEM:-1g}
+  memswap_limit: ${BENCH_MEM:-1g}
+  ports:
+    - "127.0.0.1:${BENCH_PORT:-8090}:3000"
+
+x-build: &build
+  context: .
+  dockerfile: docker/Dockerfile
+  additional_contexts:
+    ehttp: ../ehttp
+
+services:
+  ehttp:
+    <<: *app
+    profiles: [ehttp]
+    container_name: bench-ehttp
+    image: ehttp-benchmark/ehttp:local
+    build:
+      <<: *build
+      args: { APP: ehttp }
+  nethttp:
+    <<: *app
+    profiles: [nethttp]
+    container_name: bench-nethttp
+    image: ehttp-benchmark/nethttp:local
+    build:
+      <<: *build
+      args: { APP: nethttp }
+  gin:
+    <<: *app
+    profiles: [gin]
+    container_name: bench-gin
+    image: ehttp-benchmark/gin:local
+    build:
+      <<: *build
+      args: { APP: gin }
+  echo:
+    <<: *app
+    profiles: [echo]
+    container_name: bench-echo
+    image: ehttp-benchmark/echo:local
+    build:
+      <<: *build
+      args: { APP: echo }
+  fiber:
+    <<: *app
+    profiles: [fiber]
+    container_name: bench-fiber
+    image: ehttp-benchmark/fiber:local
+    build:
+      <<: *build
+      args: { APP: fiber }
