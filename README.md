@@ -45,6 +45,9 @@ next to this repo. The Docker build gets it through a **named build context**:
 the image, so the same `replace` works in the build. The commit of ehttp (and
 whether the tree is dirty) goes into `env.json` of every result.
 
+To reproduce a result, check out that commit in `../ehttp` first:
+`git -C ../ehttp checkout "$(jq -r .ehttp.commit results/<ts>/env.json)"`.
+
 ## The 4 routes (same in all apps)
 
 | Route | Response |
