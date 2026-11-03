@@ -1,6 +1,7 @@
 // Command report reads a results folder of scripts/compare.sh and writes
 // report.md with the median and the spread (min-max) of N runs for each
-// app and route.
+// app and route, and lists the dirty runs (errors, dropped iterations or a
+// container that is not running) with what failed.
 //
 //	go run ./cmd/report results/<run>
 package main
@@ -12,10 +13,22 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
 )
+
+// runFile matches a k6 summary (run-N.json, or run-N.try-K.json in retried/),
+// not the other files of a run such as run-N.container.json.
+var runFile = regexp.MustCompile(`^run-\d+(\.try-\d+)?\.json$`)
+
+// runFiles returns the k6 summaries in dir.
+func runFiles(dir string) []string {
+	files, _ := filepath.Glob(filepath.Join(dir, "run-*.json"))
+
+	return slices.DeleteFunc(files, func(f string) bool { return !runFile.MatchString(filepath.Base(f)) })
+}
 
 type run struct {
 	RPS     float64 `json:"rps"`
@@ -25,7 +38,46 @@ type run struct {
 	Err     float64 `json:"error_rate"`
 	Dropped float64 `json:"dropped"`
 
-	cpu, mem float64 // mean CPU percent and peak memory in MiB of the run
+	Failures map[string]float64 `json:"failures"` // failed requests by kind
+
+	name      string    // app/route/run-N
+	container container // state of the app container after the run
+	cpu, mem  float64   // mean CPU percent and peak memory in MiB of the run
+}
+
+// container is run-N.container.json. Status is empty when the file is missing
+// (runs made before it existed).
+type container struct {
+	Status       string `json:"status"`
+	OOMKilled    bool   `json:"oom_killed"`
+	ExitCode     int    `json:"exit_code"`
+	RestartCount int    `json:"restart_count"`
+}
+
+func (r run) dirty() bool {
+	c := r.container
+	return r.Err > 0 || r.Dropped > 0 || c.OOMKilled || c.RestartCount > 0 || (c.Status != "" && c.Status != "running")
+}
+
+// detail describes a dirty run in one line.
+func (r run) detail() string {
+	parts := []string{fmt.Sprintf("errors %.2f%%, dropped %.0f, p99 %.3f ms", r.Err*100, r.Dropped, r.P99)}
+
+	if len(r.Failures) > 0 {
+		kinds := make([]string, 0, len(r.Failures))
+		for k, n := range r.Failures {
+			kinds = append(kinds, fmt.Sprintf("%s %.0f", k, n))
+		}
+
+		slices.Sort(kinds)
+		parts = append(parts, "failures: "+strings.Join(kinds, ", "))
+	}
+
+	if c := r.container; c.Status != "" {
+		parts = append(parts, fmt.Sprintf("container: %s, exit %d, restarts %d, oom %t", c.Status, c.ExitCode, c.RestartCount, c.OOMKilled))
+	}
+
+	return fmt.Sprintf("- `%s`: %s", r.name, strings.Join(parts, "; "))
 }
 
 func main() {
@@ -56,8 +108,16 @@ func main() {
 
 	slices.Sort(names)
 
+	var dirty []string
+
 	for _, route := range routes {
-		table(&out, dir, route, names)
+		dirty = append(dirty, table(&out, dir, route, names)...)
+	}
+
+	if len(dirty) > 0 {
+		fmt.Fprintf(&out, "\n## Dirty runs\n\nRuns with errors, dropped iterations or a container that is not running. "+
+			"They count in the tables above. The k6 output is in run-N.log, the app log in container-N.log.\n\n%s\n",
+			strings.Join(dirty, "\n"))
 	}
 
 	if err := os.WriteFile(filepath.Join(dir, "report.md"), []byte(out.String()), 0o644); err != nil {
@@ -67,17 +127,30 @@ func main() {
 	fmt.Print(out.String())
 }
 
-func table(out *strings.Builder, dir, route string, apps []string) {
-	var rows []string
+// table writes the table of one route and returns the details of its dirty runs.
+func table(out *strings.Builder, dir, route string, apps []string) []string {
+	var rows, dirty []string
 
 	for _, app := range apps {
-		runs := load(filepath.Join(dir, app, route))
+		runs := load(filepath.Join(dir, app, route), app+"/"+route)
 		if len(runs) == 0 {
 			continue
 		}
 
-		rows = append(rows, fmt.Sprintf("| %s | %d | %s | %s | %s | %s | %s | %s | %s | %s |",
-			app, len(runs),
+		n := 0
+
+		for _, r := range runs {
+			if r.dirty() {
+				n++
+
+				dirty = append(dirty, r.detail())
+			}
+		}
+
+		retried := runFiles(filepath.Join(dir, app, route, "retried"))
+
+		rows = append(rows, fmt.Sprintf("| %s | %d | %d | %d | %s | %s | %s | %s | %s | %s | %s | %s |",
+			app, len(runs), n, len(retried),
 			spread(runs, func(r run) float64 { return r.RPS }, "%.0f"),
 			spread(runs, func(r run) float64 { return r.P50 }, "%.3f"),
 			spread(runs, func(r run) float64 { return r.P95 }, "%.3f"),
@@ -89,18 +162,21 @@ func table(out *strings.Builder, dir, route string, apps []string) {
 	}
 
 	if len(rows) == 0 {
-		return
+		return nil
 	}
 
-	fmt.Fprintf(out, "\n## %s\n\nMedian (min-max) of N runs.\n\n", route)
-	out.WriteString("| app | runs | RPS | p50 ms | p95 ms | p99 ms | errors % | dropped | CPU % (of 1 CPU) | mem MiB |\n")
-	out.WriteString("| :-- | --: | --: | --: | --: | --: | --: | --: | --: | --: |\n")
+	fmt.Fprintf(out, "\n## %s\n\nMedian (min-max) of N runs. dirty: runs with errors, dropped iterations "+
+		"or a container that is not running (see Dirty runs). retried: dirty runs replaced by a new run (RETRIES).\n\n", route)
+	out.WriteString("| app | runs | dirty | retried | RPS | p50 ms | p95 ms | p99 ms | errors % | dropped | CPU % (of 1 CPU) | mem MiB |\n")
+	out.WriteString("| :-- | --: | --: | --: | --: | --: | --: | --: | --: | --: | --: | --: |\n")
 	out.WriteString(strings.Join(rows, "\n") + "\n")
+
+	return dirty
 }
 
-func load(dir string) []run {
-	files, _ := filepath.Glob(filepath.Join(dir, "run-*.json"))
-	runs := make([]run, 0, len(files))
+func load(dir, prefix string) []run {
+	files := runFiles(dir)
+	out := make([]run, 0, len(files))
 
 	for _, f := range files {
 		b, err := os.ReadFile(f)
@@ -113,11 +189,18 @@ func load(dir string) []run {
 			continue
 		}
 
-		r.cpu, r.mem = stats(strings.TrimSuffix(f, ".json") + ".stats.csv")
-		runs = append(runs, r)
+		base := strings.TrimSuffix(f, ".json")
+		r.name = prefix + "/" + filepath.Base(base)
+		r.cpu, r.mem = stats(base + ".stats.csv")
+
+		if b, err := os.ReadFile(base + ".container.json"); err == nil {
+			_ = json.Unmarshal(b, &r.container)
+		}
+
+		out = append(out, r)
 	}
 
-	return runs
+	return out
 }
 
 // stats returns the mean CPU percent and the peak memory (MiB) of a docker stats file.

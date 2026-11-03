@@ -6,10 +6,14 @@
 // RATE (4000 req/s), DURATION (30s), WARMUP (10s, 0 skips it), PRE_VUS (200),
 // MAX_VUS (2000), OUT (a file for the JSON summary; empty writes none).
 //
+// Failed requests are counted by kind (k6 error_code) in the summary, so a run
+// with errors tells what failed: timeout, refused, reset, http_5xx, ...
+//
 // The warm-up scenario is not counted: every threshold and the summary read the
 // metrics tagged scenario:measured only.
 import http from 'k6/http';
 import { check } from 'k6';
+import { Counter } from 'k6/metrics';
 import { num, str, seconds } from '../lib/env.js';
 
 const base = str('BASE_URL', 'http://127.0.0.1:8090');
@@ -42,6 +46,22 @@ function scenario(startTime, d) {
   };
 }
 
+// kind maps a k6 error_code to a failure kind.
+// https://grafana.com/docs/k6/latest/javascript-api/error-codes/
+const kinds = ['timeout', 'dial_timeout', 'refused', 'reset', 'write', 'http_4xx', 'http_5xx', 'other'];
+function kind(code) {
+  if (code === 1050) return 'timeout';
+  if (code === 1211) return 'dial_timeout';
+  if (code === 1212) return 'refused';
+  if (code === 1220) return 'reset';
+  if (code === 1201 || code === 1202) return 'write';
+  if (code >= 1400 && code < 1500) return 'http_4xx';
+  if (code >= 1500 && code < 1600) return 'http_5xx';
+  return 'other';
+}
+
+const failures = new Counter('failures');
+
 const scenarios = {};
 if (seconds(warmup) > 0) scenarios.warmup = scenario('0s', warmup);
 scenarios.measured = scenario(`${seconds(warmup)}s`, duration);
@@ -55,6 +75,7 @@ export const options = {
     'http_req_failed{scenario:measured}': ['rate>=0'],
     'http_reqs{scenario:measured}': ['count>=0'],
     'dropped_iterations{scenario:measured}': ['count>=0'],
+    ...Object.fromEntries(kinds.map((k) => [`failures{scenario:measured,kind:${k}}`, ['count>=0']])),
   },
   summaryTrendStats: ['avg', 'min', 'med', 'p(95)', 'p(99)', 'max'],
 };
@@ -68,9 +89,12 @@ export function hit() {
   if (++n % 100 === 0) {
     const res = http.get(`${base}${target.path}`, textParams);
     check(res, { 'status 200': (r) => r.status === 200, body: target.ok });
+    if (res.error_code) failures.add(1, { kind: kind(res.error_code) });
     return;
   }
-  check(http.get(`${base}${target.path}`), { 'status 200': (r) => r.status === 200 });
+  const res = http.get(`${base}${target.path}`);
+  check(res, { 'status 200': (r) => r.status === 200 });
+  if (res.error_code) failures.add(1, { kind: kind(res.error_code) });
 }
 
 function metric(data, name) {
@@ -80,6 +104,11 @@ function metric(data, name) {
 export function handleSummary(data) {
   const d = metric(data, 'http_req_duration{scenario:measured}');
   const count = metric(data, 'http_reqs{scenario:measured}').count || 0;
+  const failed = {};
+  for (const k of kinds) {
+    const c = metric(data, `failures{scenario:measured,kind:${k}}`).count || 0;
+    if (c > 0) failed[k] = c;
+  }
   const result = {
     app,
     route,
@@ -93,6 +122,7 @@ export function handleSummary(data) {
     max_ms: d.max,
     error_rate: metric(data, 'http_req_failed{scenario:measured}').rate || 0,
     dropped: metric(data, 'dropped_iterations{scenario:measured}').count || 0,
+    failures: failed,
   };
   const line = `RESULT app=${app} route=${route} rps=${result.rps.toFixed(0)} ` +
     `p50=${d.med.toFixed(3)}ms p95=${d['p(95)'].toFixed(3)}ms p99=${d['p(99)'].toFixed(3)}ms ` +

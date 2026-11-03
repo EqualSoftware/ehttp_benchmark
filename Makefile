@@ -15,7 +15,7 @@ help:
 	@echo "make compare-all           all apps, interleaved (RUNS rounds), then report"
 	@echo "make report RESULTS=dir    write report.md for a results folder"
 	@echo "make stress-{stress,breakpoint,spike,soak} APP=ehttp"
-	@echo "env: RUNS RATE DURATION WARMUP ROUTES BENCH_CPUSET BENCH_CPUS BENCH_MEM BENCH_PORT"
+	@echo "env: RUNS RUN_FROM RETRIES RATE DURATION WARMUP ROUTES BENCH_CPUSET BENCH_CPUS BENCH_MEM BENCH_PORT"
 
 vet:
 	go vet ./... && go build ./...

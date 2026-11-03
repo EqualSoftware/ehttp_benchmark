@@ -93,12 +93,15 @@ they build on a panic (nothing panics in the benchmark).
 - **N runs** per app and route (`RUNS`, default 10; [benchstat](https://pkg.go.dev/golang.org/x/perf/cmd/benchstat): at least 10, ideally 20). `compare-all` interleaves the apps and rotates their order each round, so drift (heat, other load) does not favor one app.
 - The report shows **median (min-max)** of RPS, p50, p95, p99, error rate, `dropped_iterations`, app CPU (mean of `docker stats`, % of one CPU) and peak memory.
 - **`dropped_iterations` must be 0.** If not, the generator could not hold the rate: lower `RATE` or raise `MAX_VUS`. The result is then not valid.
+- A run with errors, dropped iterations or an app container that is not running after it is **dirty**. The report counts the dirty runs per app and route and lists each one with its failures by kind (k6 `error_code`: timeout, refused, reset, http_5xx, ...) and the container state. The k6 output of each run is in `run-N.log`, the app log in `container-N.log`.
+- `RETRIES` (default 0) runs a dirty run again, up to that many times; the dirty one moves to `retried/` and the report counts it. A retry hides a dirty run from the tables, so keep `RETRIES=0` when the question is whether an app fails, and read the retried column.
 - At a fixed rate, RPS is equal by design; compare latency and CPU. To compare capacity, raise `RATE` until `dropped` or errors appear, or use the breakpoint test on each app.
 - Each run records `env.json`: machine, Docker VM CPUs and memory, limits, versions, ehttp commit.
 
 ```sh
 make compare APP=gin RUNS=10 RATE=4000 DURATION=30s WARMUP=10s ROUTES="plaintext json users mw"
 make compare-all RUNS=10
+make compare-all RUNS=2 RUN_FROM=4 RESULTS=results/<ts>   # redo rounds 4-5 in an existing folder
 make report RESULTS=results/<ts>
 ```
 
@@ -140,3 +143,5 @@ For soak, read memory in the stats file: a steady rise points to a leak.
 - Numbers from `make smoke` are a check, not a benchmark.
 - The app CPU from `docker stats` comes from the VM and has a sampling step of about 1.5 s. The sampler itself uses a little CPU.
 - Results from a Mac are not comparable with Linux bare metal.
+- The port forwarding of Docker Desktop can reset connections while the app is far from its CPU limit. Such runs show `failures: reset` in the report with a low app CPU. It is a cost of the setup, not of the app: redo the run.
+- Noise on the host (background jobs, heat) can slow down every app for minutes. In the report, it shows as dirty runs of several apps in a row. Redo those rounds in the same folder: `make compare-all RUNS=<n> RUN_FROM=<first round> RESULTS=results/<ts>`.
