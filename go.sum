@@ -1,3 +1,5 @@
+github.com/EqualSoftware/ehttp v0.0.0-20261102204248-f214ee9517a2 h1:u1tRO9XnQR63SnmOVl0tRS0p6B5VHuVkk2pFRgeS9H0=
+github.com/EqualSoftware/ehttp v0.0.0-20261102204248-f214ee9517a2/go.mod h1:12YCHssxvWOsBWzf051b5tTUnbKt22Ic4/KxsKRy8/I=
 github.com/beorn7/perks v1.0.1 h1:VlbKKnNfV8bJzeqoa4cOKqO6bYr3WgKZxO8Z16+hsOM=
 github.com/beorn7/perks v1.0.1/go.mod h1:G2ZrVWU2WbWT9wwq4/hrbKbnv/1ERSJQ0ibhJ6rlkpw=
 github.com/bytedance/gopkg v0.1.3 h1:TPBSwH8RsouGCBcMBktLt1AymVo2TVsBVCY4b6TnZ/M=

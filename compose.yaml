@@ -19,8 +19,6 @@ x-app: &app
 x-build: &build
   context: .
   dockerfile: docker/Dockerfile
-  additional_contexts:
-    ehttp: ../ehttp
 
 services:
   ehttp:

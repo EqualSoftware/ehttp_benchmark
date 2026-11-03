@@ -3,9 +3,8 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-ehttp_dir="${EHTTP_DIR:-../ehttp}"
-dirty=false
-[ -n "$(git -C "$ehttp_dir" status --porcelain 2>/dev/null)" ] && dirty=true
+# ehttp comes from GitHub at the version in go.mod. A pseudo-version ends with the commit.
+ehttp_version="$(go list -m -f '{{.Version}}' github.com/EqualSoftware/ehttp)"
 
 jq -n \
   --arg date "$(date -u +%FT%TZ)" \
@@ -21,8 +20,8 @@ jq -n \
   --arg mem "${BENCH_MEM:-1g}" \
   --arg k6 "$(k6 version | head -1)" \
   --arg go "$(grep -m1 '^FROM golang' docker/Dockerfile | cut -d' ' -f2)" \
-  --arg ehttp_commit "$(git -C "$ehttp_dir" rev-parse HEAD 2>/dev/null || echo unknown)" \
-  --argjson ehttp_dirty "$dirty" \
+  --arg ehttp_version "$ehttp_version" \
+  --arg ehttp_commit "${ehttp_version##*-}" \
   --arg bench_commit "$(git rev-parse --verify -q HEAD || echo uncommitted)" \
   --arg gin "$(go list -m -f '{{.Version}}' github.com/gin-gonic/gin)" \
   --arg echo "$(go list -m -f '{{.Version}}' github.com/labstack/echo/v5)" \
@@ -31,4 +30,4 @@ jq -n \
     docker:{version:$docker, vm_cpus:$vm_cpus, vm_mem_bytes:$vm_mem_bytes},
     app_limits:{cpuset:$cpuset, cpus:$cpus, mem:$mem},
     versions:{k6:$k6, go_image:$go, gin:$gin, echo:$echo, fiber:$fiber, nethttp:"stdlib of the Go image"},
-    ehttp:{commit:$ehttp_commit, dirty:$ehttp_dirty}, bench_commit:$bench_commit}'
+    ehttp:{version:$ehttp_version, commit:$ehttp_commit}, bench_commit:$bench_commit}'

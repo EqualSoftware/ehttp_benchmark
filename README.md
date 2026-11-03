@@ -39,14 +39,18 @@ Requires Docker, `k6` (tested v2.3.0), Go 1.27+ and `jq`.
 
 ### The ehttp library
 
-`go.mod` has `replace github.com/EqualSoftware/ehttp => ../ehttp`. Clone ehttp
-next to this repo. The Docker build gets it through a **named build context**:
-`additional_contexts: ehttp: ../ehttp` in `compose.yaml`, copied to `/ehttp` in
-the image, so the same `replace` works in the build. The commit of ehttp (and
-whether the tree is dirty) goes into `env.json` of every result.
+ehttp comes from GitHub like the other frameworks: `go.mod` pins
+`github.com/EqualSoftware/ehttp` to a commit (a pseudo-version, ehttp has no
+tags yet). The Docker build downloads it with `go mod download`. The version
+and its commit go into `env.json` of every result, and `go.mod` at the
+`bench_commit` of a result gives the same build.
 
-To reproduce a result, check out that commit in `../ehttp` first:
-`git -C ../ehttp checkout "$(jq -r .ehttp.commit results/<ts>/env.json)"`.
+To benchmark another ehttp commit, push it to GitHub first, then:
+
+```sh
+go get github.com/EqualSoftware/ehttp@<commit> && go mod tidy
+make build
+```
 
 ## The 4 routes (same in all apps)
 
@@ -99,7 +103,7 @@ they build on a panic (nothing panics in the benchmark).
 - A run with errors, dropped iterations or an app container that is not running after it is **dirty**. The report counts the dirty runs per app and route and lists each one with its failures by kind (k6 `error_code`: timeout, refused, reset, http_5xx, ...) and the container state. The k6 output of each run is in `run-N.log`, the app log in `container-N.log`.
 - `RETRIES` (default 0) runs a dirty run again, up to that many times; the dirty one moves to `retried/` and the report counts it. A retry hides a dirty run from the tables, so keep `RETRIES=0` when the question is whether an app fails, and read the retried column.
 - At a fixed rate, RPS is equal by design; compare latency and CPU. To compare capacity, raise `RATE` until `dropped` or errors appear, or use the breakpoint test on each app.
-- Each run records `env.json`: machine, Docker VM CPUs and memory, limits, versions, ehttp commit.
+- Each run records `env.json`: machine, Docker VM CPUs and memory, limits, versions, ehttp version and commit.
 
 ```sh
 make compare APP=gin RUNS=10 RATE=4000 DURATION=30s WARMUP=10s ROUTES="plaintext json users mw"

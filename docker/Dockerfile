@@ -1,12 +1,8 @@
 # Builds one benchmark app. APP picks the folder under apps/.
-# The build needs the ehttp library for the "replace" line of go.mod. Pass it
-# as the named context "ehttp" (compose.yaml does this):
-#   docker build --build-context ehttp=../ehttp --build-arg APP=gin -f docker/Dockerfile .
+#   docker build --build-arg APP=gin -f docker/Dockerfile .
 FROM golang:1.27.3-alpine AS build
 ARG APP
 WORKDIR /bench
-# go.mod has "replace github.com/EqualSoftware/ehttp => ../ehttp", so ehttp lives at /ehttp.
-COPY --from=ehttp / /ehttp
 COPY go.mod go.sum ./
 RUN go mod download
 COPY apps apps

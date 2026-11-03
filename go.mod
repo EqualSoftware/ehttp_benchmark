@@ -3,7 +3,7 @@ module github.com/EqualSoftware/ehttp_benchmark
 go 1.27.0
 
 require (
-	github.com/EqualSoftware/ehttp v0.0.0
+	github.com/EqualSoftware/ehttp v0.0.0-20261102204248-f214ee9517a2
 	github.com/gin-gonic/gin v1.12.0
 	github.com/gofiber/fiber/v3 v3.6.1
 	github.com/google/uuid v1.6.0
@@ -62,5 +62,3 @@ require (
 	golang.org/x/time v0.15.0 // indirect
 	google.golang.org/protobuf v1.36.12 // indirect
 )
-
-replace github.com/EqualSoftware/ehttp => ../ehttp
